@@ -32,11 +32,20 @@ class Engine
         winrt::com_ptr<IUIAutomationElement> window_element;
         winrt::com_ptr<IUIAutomationElement> text_element;
 
-        auto window = FindWindowW(L"LiveCaptionsDesktopWindow", nullptr);
-        winrt::check_hresult(_automation->ElementFromHandle(window, window_element.put()));
-        winrt::check_hresult(window_element->FindFirst(TreeScope_Descendants, _condition.get(), text_element.put()));
-        winrt::check_hresult(text_element->get_CurrentName(text.put()));
-        return text.get();
+        try{
+            auto window = FindWindowW(L"LiveCaptionsDesktopWindow", nullptr);
+            winrt::check_hresult(_automation->ElementFromHandle(window, window_element.put()));
+            winrt::check_hresult(window_element->FindFirst(TreeScope_Descendants, _condition.get(), text_element.put()));
+            if (text_element)
+            {
+                winrt::check_hresult(text_element->get_CurrentName(text.put()));
+                return text.get();
+            }
+            return winrt::hstring();
+        }
+        catch (winrt::hresult_error &e){}
+        catch (std::exception &e){}
+        return winrt::hstring();
     }
 
 public:
@@ -50,7 +59,10 @@ public:
 
     void save_current_captions(bool includeLastLine = false)
     {
-        auto current = winrt::to_string(get_livecaptions());
+        auto hs_current = get_livecaptions();
+        if(hs_current.empty()) return;
+        auto current = winrt::to_string(hs_current);
+        
         std::vector<std::string> lines;
         std::string line;
         std::istringstream iss(current);
