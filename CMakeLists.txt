@@ -10,7 +10,8 @@ target_precompile_headers(get-livecaptions PRIVATE src/pch.h)
 
 find_package(asio CONFIG REQUIRED)
 find_package(wil CONFIG REQUIRED)
-target_link_libraries(get-livecaptions PRIVATE WIL::WIL asio::asio)
+find_package(argparse CONFIG REQUIRED)
+target_link_libraries(get-livecaptions PRIVATE WIL::WIL asio::asio argparse::argparse)
 
 #if you use lastest cppwinrt from vcpkg, uncomment following
 #find_package(cppwinrt CONFIG REQUIRED)

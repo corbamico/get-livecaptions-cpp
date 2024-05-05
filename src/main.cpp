@@ -4,6 +4,8 @@ using namespace winrt;
 using namespace winrt::Windows::Foundation;
 using namespace winrt::Windows::UI::UIAutomation;
 
+#define VERSION_STRING "0.1.240505"
+
 std::string get_current_time()
 {
     // [TIPS]c+20 runtime is too expensive, + 500k for following implement.
@@ -111,14 +113,14 @@ public:
 
 
 
-void usage()
-{
-    std::cerr << "Write all content of LiveCaptions Windows System Program into file, continually.Ctrl-C to exit." << std::endl;
-    std::cerr << "Usage: get-livecatpions file" << std::endl;
-    std::cerr << "Options:" << std::endl;
-    std::cerr << "  file            filename, to save content of live catpions running." << std::endl;
-    exit(1);
-}
+// void usage()
+// {
+//     std::cerr << "Write all content of LiveCaptions Windows System Program into file, continually.Ctrl-C to exit." << std::endl;
+//     std::cerr << "Usage: get-livecatpions file" << std::endl;
+//     std::cerr << "Options:" << std::endl;
+//     std::cerr << "  file            filename, to save content of live catpions running." << std::endl;
+//     exit(1);
+// }
 bool touch_file(const std::string &filename)
 {
     std::ofstream file(filename,std::ios::app);
@@ -129,18 +131,39 @@ bool touch_file(const std::string &filename)
 
 int main(int argc, char *argv[])
 {
-    if ((argc != 2) || (!touch_file(argv[1])))
-        usage();
-    if (!Engine::is_livecaption_running())
-    {
-        std::cerr << "[Error]Live Captions is not running." <<std::endl; 
-        exit(1);
+
+
+    std::string strFileName;
+    argparse::ArgumentParser program("get-livecaptions",VERSION_STRING);
+    program.add_argument("-o", "--output")
+        .metavar("file")
+        .help("filename, write content into file. use - for console.")
+        .required();
+
+    program.add_description("Write the content of LiveCaptions Windows System Program into file, continually.");
+    program.add_epilog("use ctrl-c to exit program.");
+
+    try {
+        if(argc==1) {program.print_help();exit(1);}
+        program.parse_args(argc, argv);
+        strFileName = program.get<std::string>("--output");
+
+        if (!Engine::is_livecaption_running())
+        {
+            std::cerr << "[Error]Live Captions is not running." <<std::endl; 
+            exit(1);
+        }
+    }
+    catch (const std::exception& err) {
+        std::cerr << err.what() << std::endl;
+        std::cerr << program;
+        return 1;
     }
 
     try
     {
         asio::io_context io_context(1);
-        Engine eng(argv[1]);
+        Engine eng(strFileName);
 
         asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](auto, auto){ 

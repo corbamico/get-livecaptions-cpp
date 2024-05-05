@@ -11,3 +11,4 @@
 #include <winrt/windows.ui.uiautomation.h>
 #include <uiautomation.h>
 #include <wil/resource.h>
+#include <argparse/argparse.hpp>
