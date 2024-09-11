@@ -6,9 +6,10 @@ check slibing project [get-livecaptions-rs](https://github.com/corbamico/get-liv
 ## Usage
 
 ```cmd
-Usage: get-livecatpions file
-Options:
-  file            filename, to save content of live catpions running.
+Optional arguments:
+  -h, --help         shows help message and exits
+  -v, --version      prints version information and exits
+  -o, --output file  filename, write content into file. use - for console. [required]
 ```
 
 ## UIAutomation
