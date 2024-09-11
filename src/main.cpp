@@ -4,7 +4,7 @@ using namespace winrt;
 using namespace winrt::Windows::Foundation;
 using namespace winrt::Windows::UI::UIAutomation;
 
-#define VERSION_STRING "0.1.240505"
+#define VERSION_STRING "0.1.240911"
 
 std::string get_current_time()
 {
@@ -27,13 +27,13 @@ class Engine
     winrt::com_ptr<IUIAutomationCondition> _condition;
     std::string _prebuffer;
     std::string _sfilename;
-
+    
     winrt::hstring get_livecaptions()
     {
         wil::unique_bstr text;
         winrt::com_ptr<IUIAutomationElement> window_element;
         winrt::com_ptr<IUIAutomationElement> text_element;
-
+        
         try{
             auto window = FindWindowW(L"LiveCaptionsDesktopWindow", nullptr);
             winrt::check_hresult(_automation->ElementFromHandle(window, window_element.put()));
@@ -43,23 +43,14 @@ class Engine
                 winrt::check_hresult(text_element->get_CurrentName(text.put()));
                 return text.get();
             }
+            
             return winrt::hstring();
         }
         catch (winrt::hresult_error &e){}
         catch (std::exception &e){}
         return winrt::hstring();
     }
-
-public:
-    Engine(const std::string &filename) : _sfilename{filename}
-    {
-        winrt::init_apartment();
-        _automation = try_create_instance<IUIAutomation>(guid_of<CUIAutomation>());
-        winrt::check_hresult(_automation->CreatePropertyCondition(UIA_AutomationIdPropertyId, wil::make_variant_bstr(L"CaptionsTextBlock"), _condition.put()));
-    }
-    ~Engine() { winrt::uninit_apartment(); }
-
-    void save_current_captions(bool includeLastLine = false)
+    void ostream_captions(std::ostream &os)
     {
         auto hs_current = get_livecaptions();
         if(hs_current.empty()) return;
@@ -87,47 +78,53 @@ public:
         if (first_new_line < lines.size())
         {
             // Append new lines to the file and prebuffer
-            std::ofstream file(_sfilename, std::ios::app);
-            if (!file.is_open())
-            {
-                std::cerr << "[Error]Failed to open file: " << _sfilename << std::endl;
-                return;
-            }
-
-
-            file << "[" << get_current_time() << "] " << std::endl;
+            os << "[" << get_current_time() << "] " << std::endl;
 
             for (size_t i = first_new_line; i < lines.size(); ++i)
             {
-                file << lines[i] << std::endl;
+                os << lines[i] << std::endl;
             }
-            file.flush();
-            file.close();
-        }
+        } 
     }
+public:
+    Engine(const std::string &filename) : _sfilename{filename}
+    {
+        winrt::init_apartment();
+        _automation = try_create_instance<IUIAutomation>(guid_of<CUIAutomation>());
+        winrt::check_hresult(_automation->CreatePropertyCondition(UIA_AutomationIdPropertyId, wil::make_variant_bstr(L"CaptionsTextBlock"), _condition.put()));
+    }
+    ~Engine() { winrt::uninit_apartment(); }
+
     static bool is_livecaption_running()
     {
         return FindWindowW(L"LiveCaptionsDesktopWindow", nullptr) != NULL;
     }
+
+    void ouput_captions()
+    {
+        if(_sfilename.compare("-")==0)
+        {
+            ostream_captions(std::cout);
+            return;
+        }
+        std::ofstream of(_sfilename,std::ios::app);
+        if (of.is_open())
+        {
+            ostream_captions(of);
+            of.flush();
+            of.close();
+        }
+    }
+    bool touch_file()
+    {
+        if(_sfilename.compare("-")==0) return true;
+
+        std::ofstream file(_sfilename,std::ios::app);
+        auto ret = file.is_open();
+        file.close();
+        return ret;
+    }
 };
-
-
-
-// void usage()
-// {
-//     std::cerr << "Write all content of LiveCaptions Windows System Program into file, continually.Ctrl-C to exit." << std::endl;
-//     std::cerr << "Usage: get-livecatpions file" << std::endl;
-//     std::cerr << "Options:" << std::endl;
-//     std::cerr << "  file            filename, to save content of live catpions running." << std::endl;
-//     exit(1);
-// }
-bool touch_file(const std::string &filename)
-{
-    std::ofstream file(filename,std::ios::app);
-    auto ret = file.is_open();
-    file.close();
-    return ret;
-}
 
 int main(int argc, char *argv[])
 {
@@ -168,7 +165,7 @@ int main(int argc, char *argv[])
         asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](auto, auto){ 
                                 std::cerr << "ctrl-c to exit." <<std::endl;        
-                                eng.save_current_captions(); 
+                                eng.ouput_captions(); 
                                 io_context.stop();
                             });
         std::cout<<"Save content into file, every 1 min."<<std::endl;
@@ -186,7 +183,7 @@ int main(int argc, char *argv[])
                                     io_context.stop();
                                     break;
                                 }
-                                if(ulCount++%6==0) eng.save_current_captions();            
+                                if(ulCount++%6==0) eng.ouput_captions();            
                             }
                             co_return; 
                         }, 
