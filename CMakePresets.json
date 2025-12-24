@@ -1,34 +1,55 @@
 {
-    "version": 8,
-    "cmakeMinimumRequired": {
-        "major": 3,
-        "minor": 21,
-        "patch": 0
+  "version": 8,
+
+  "configurePresets": [
+    {
+      "name": "vs2026-x64",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/builds/${presetName}",
+      "toolchainFile": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake"
     },
-    "configurePresets": [
-        {
-            "name": "ninja-multi-vcpkg",
-            "displayName": "Ninja Multi-Config",
-            "description": "Configure with vcpkg toolchain and generate Ninja project files for all configurations",
-            "binaryDir": "${sourceDir}/builds/${presetName}",
-            "generator": "Ninja Multi-Config",
-            "toolchainFile": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake"
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "ninja-vcpkg-debug",
-            "configurePreset": "ninja-multi-vcpkg",
-            "displayName": "Build (Debug)",
-            "description": "Build with Ninja/vcpkg (Debug)",
-            "configuration": "Debug"
-        },
-        {
-            "name": "ninja-vcpkg-release",
-            "configurePreset": "ninja-multi-vcpkg",
-            "displayName": "Build (Release)",
-            "description": "Build with Ninja/vcpkg (Release)",
-            "configuration": "Release"
-        }
-    ]
+
+    {
+      "name": "vs2026-x64-static",
+      "inherits": "vs2026-x64",
+      "displayName": "VS2026 x64 (Static zlib/libcurl)",
+      "description": "Use vcpkg static triplet for zlib/libcurl only",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "vs2026-x64",
+      "displayName": "Build (Debug)",
+      "description": "Build with vsbuild/vcpkg (Debug)",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "vs2026-x64",
+      "displayName": "Build (Release)",
+      "description": "Build with vsbuild/vcpkg (Release)",
+      "configuration": "Release"
+    },
+
+    {
+      "name": "debug-static",
+      "configurePreset": "vs2026-x64-static",
+      "displayName": "Build (Static Debug)",
+      "description": "Build with static zlib/libcurl (Debug)",
+      "configuration": "Debug"
+    },
+    {
+      "name": "release-static",
+      "configurePreset": "vs2026-x64-static",
+      "displayName": "Build (Static Release)",
+      "description": "Build with static zlib/libcurl (Release)",
+      "configuration": "Release"
+    }
+  ]
 }

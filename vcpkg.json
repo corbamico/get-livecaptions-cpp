@@ -4,6 +4,7 @@
     "dependencies": [
       "asio",
       "wil",
-      "argparse"
+      "argparse",
+      "curl"
     ]
 }

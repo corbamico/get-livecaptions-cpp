@@ -7,6 +7,8 @@
 #include <chrono>
 #include <iostream>
 #include <fstream>
+#include <optional>
+#include <mutex>
 
 #include <winrt/windows.ui.uiautomation.h>
 #include <uiautomation.h>
