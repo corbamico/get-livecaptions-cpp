@@ -11,6 +11,20 @@ FetchContent_Declare(CPM GIT_REPOSITORY https://github.com/cpm-cmake/CPM.cmake.g
 FetchContent_MakeAvailable(CPM)
 CPMAddPackage("gh:argosopentech/LibreTranslate-cpp#main")
 
+# Patch LibreTranslate.cpp to add a 10-second CURL operation timeout.
+# Without this the synchronous curl_easy_perform call can stall the ASIO event
+# loop for up to the system default (~300s) when LibreTranslate is unreachable.
+set(_lt_src "${LibreTranslate-cpp_SOURCE_DIR}/LibreTranslate.cpp")
+file(READ "${_lt_src}" _lt_content)
+if(NOT _lt_content MATCHES "CURLOPT_TIMEOUT")
+    string(REPLACE
+        "curl_easy_setopt(curl, CURLOPT_POSTFIELDS"
+        "curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);\n    curl_easy_setopt(curl, CURLOPT_POSTFIELDS"
+        _lt_content "${_lt_content}")
+    file(WRITE "${_lt_src}" "${_lt_content}")
+    message(STATUS "LibreTranslate: patched with 10s CURL operation timeout")
+endif()
+
 find_package(asio CONFIG REQUIRED)
 find_package(wil CONFIG REQUIRED)
 find_package(argparse CONFIG REQUIRED)

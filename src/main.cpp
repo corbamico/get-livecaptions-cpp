@@ -6,7 +6,7 @@ using namespace winrt;
 using namespace winrt::Windows::Foundation;
 using namespace winrt::Windows::UI::UIAutomation;
 
-#define VERSION_STRING "0.2.251225"
+#define VERSION_STRING "0.3.260320"
 
 std::string get_current_time()
 {
@@ -14,7 +14,7 @@ std::string get_current_time()
     // The buffer and string are allocated once per thread and reused on subsequent calls.
     thread_local static std::string time_str;
     thread_local static char buf[64];
-    
+
     std::time_t now_c = std::time(nullptr);
     std::tm tm_buf{};
 #ifdef _WIN32
@@ -22,7 +22,7 @@ std::string get_current_time()
 #else
     localtime_r(&now_c, &tm_buf);
 #endif
-    
+
     if (std::strftime(buf, sizeof(buf), "%Y/%m/%d %X", &tm_buf)) {
         time_str.assign(buf);
         return time_str;
@@ -31,13 +31,16 @@ std::string get_current_time()
     return time_str;
 }
 
+// Parsed captions: (full text, lines)
+using ParsedCaptions = std::pair<std::string, std::vector<std::string>>;
+
 class Engine
 {
     winrt::com_ptr<IUIAutomation> _automation;
     winrt::com_ptr<IUIAutomationCondition> _condition;
     winrt::com_ptr<IUIAutomationElement> _cached_text_element; // Cache text_element to reduce repeated lookups
     std::string _prebuffer;
-    std::string _prebuffer_tanslated;
+    std::string _prebuffer_translated;
     std::string _sfilename;
     LibreTranslateAPI _ltapi;
 
@@ -58,9 +61,9 @@ class Engine
                 _cached_text_element = nullptr;
                 return winrt::hstring();
             }
-            
+
             winrt::check_hresult(_automation->ElementFromHandle(window, window_element.put()));
-            
+
             // Try to use cached text_element first; if it fails, recreate it
             if (_cached_text_element) {
                 HRESULT hr = _cached_text_element->get_CurrentName(text.put());
@@ -70,7 +73,7 @@ class Engine
                 // Cached element is stale, clear it and recreate
                 _cached_text_element = nullptr;
             }
-            
+
             // Recreate text_element from window element
             winrt::com_ptr<IUIAutomationElement> text_element;
             winrt::check_hresult(window_element->FindFirst(TreeScope_Descendants, _condition.get(), text_element.put()));
@@ -83,34 +86,38 @@ class Engine
 
             return winrt::hstring();
         }
-        catch (winrt::hresult_error &e){}
-        catch (std::exception &e){}
+        catch (winrt::hresult_error &e){
+            std::cerr << "[UIAutomation error] " << winrt::to_string(e.message()) << std::endl;
+        }
+        catch (std::exception &e){
+            std::cerr << "[error] " << e.what() << std::endl;
+        }
         return winrt::hstring();
     }
-    void ostream_translate_line(std::string_view text, std::ostream &os = std::cerr, std::string_view source_lang = "es", std::string_view target_lang = "en")
-    {
 
+    void ostream_translate_line(std::string_view text, std::ostream &os, std::string_view source_lang = "es", std::string_view target_lang = "en")
+    {
         try {
             auto tr = _ltapi.translate(std::string{text}, std::string{source_lang}, std::string{target_lang});
             if (tr.is_object() && tr.contains("translatedText")) {
                 os << "\033[34m" << tr["translatedText"].get<std::string>() << "\033[0m" << std::endl;
             } else {
-                os << "[translation_error]" << tr.dump() << std::endl;
+                std::cerr << "[translation_error]" << tr.dump() << std::endl;
             }
         } catch (const std::exception &e) {
-            os << "[translation_error] " << e.what() << std::endl;
+            std::cerr << "[translation_error] " << e.what() << std::endl;
         } catch (const char *e) {
-            os << "[translation_error] " << e << std::endl;
+            std::cerr << "[translation_error] " << e << std::endl;
         }
     }
 
-    void ostream_translate(std::ostream &os = std::cerr, std::string_view source_lang = "es")
+    void ostream_translate(const ParsedCaptions& captions, std::ostream &os, std::string_view source_lang = "es")
     {
-        auto [current, lines] = parse_captions();
+        const auto& [current, lines] = captions;
         if (lines.empty()) return;
 
-        size_t first_new_line = find_first_new_line(lines, _prebuffer_tanslated);
-        _prebuffer_tanslated = std::move(current);
+        size_t first_new_line = find_first_new_line(lines, _prebuffer_translated);
+        _prebuffer_translated = current;
 
         std::string combined;
         for (size_t i = first_new_line; i < lines.size(); ++i) {
@@ -118,17 +125,17 @@ class Engine
             if (i + 1 < lines.size()) combined.push_back('\n');
         }
 
-        if (!combined.empty()) 
+        if (!combined.empty())
             ostream_translate_line(combined, os, source_lang, "en");
     }
 
-    void ostream_captions(std::ostream &os)
+    void ostream_captions(const ParsedCaptions& captions, std::ostream &os)
     {
-        auto [current, lines] = parse_captions();
+        const auto& [current, lines] = captions;
         if (lines.empty()) return;
 
         size_t first_new_line = find_first_new_line(lines, _prebuffer);
-        _prebuffer = std::move(current);
+        _prebuffer = current;
 
         os << "[" << get_current_time() << "] " << std::endl;
         for (size_t i = first_new_line; i < lines.size(); ++i) {
@@ -136,29 +143,18 @@ class Engine
         }
     }
 
-    // New helper method to reduce duplication
-    std::pair<std::string, std::vector<std::string>> parse_captions()
-    {
-        auto hs_current = get_livecaptions();
-        if(hs_current.empty()) return {};
-        auto current = winrt::to_string(hs_current);
-
-        std::vector<std::string> lines;
-        std::string line;
-        std::istringstream iss(current);
-        while (std::getline(iss, line)) {
-            lines.emplace_back(std::move(line));
-        }
-        return {std::move(current), std::move(lines)};
-    }
-
-    // Returns index of first new line, or lines.size() if all processed
+    // Returns index of first new line by exact-line membership check (avoids false substring matches)
     size_t find_first_new_line(const std::vector<std::string>& lines, std::string_view prebuffer)
     {
+        std::unordered_set<std::string> seen;
+        std::string pb_line;
+        std::istringstream pbs{std::string{prebuffer}};
+        while (std::getline(pbs, pb_line))
+            seen.insert(pb_line);
+
         for (size_t i = 0; i < lines.size(); ++i) {
-            if (prebuffer.find(lines[i]) == std::string_view::npos) {
+            if (!seen.count(lines[i]))
                 return i;
-            }
         }
         return lines.size();
     }
@@ -186,14 +182,41 @@ public:
         return FindWindowW(L"LiveCaptionsDesktopWindow", nullptr) != NULL;
     }
 
-    void output_translate(std::string_view source_lang)
+    ParsedCaptions parse_captions()
     {
-        ostream_translate(std::cerr, source_lang);
+        auto hs_current = get_livecaptions();
+        if(hs_current.empty()) return {};
+        auto current = winrt::to_string(hs_current);
+
+        std::vector<std::string> lines;
+        std::string line;
+        std::istringstream iss(current);
+        while (std::getline(iss, line)) {
+            lines.emplace_back(std::move(line));
+        }
+        return {std::move(current), std::move(lines)};
     }
-    void output_captions()
+
+    void output_translate(const ParsedCaptions& captions, std::string_view source_lang)
+    {
+        if (!_sfilename.empty() && _sfilename[0] == '-') {
+            ostream_translate(captions, std::cout, source_lang);
+            return;
+        }
+
+        std::scoped_lock lock(_file_mutex);
+        if (!_output_file || !_output_file->is_open()) {
+            _output_file.emplace(_sfilename, std::ios::app);
+        }
+        if (_output_file && _output_file->is_open()) {
+            ostream_translate(captions, *_output_file, source_lang);
+        }
+    }
+
+    void output_captions(const ParsedCaptions& captions)
     {
         if(!_sfilename.empty() && _sfilename[0] == '-') {
-            ostream_captions(std::cout);
+            ostream_captions(captions, std::cout);
             return;
         }
 
@@ -204,9 +227,10 @@ public:
         }
 
         if (_output_file && _output_file->is_open()) {
-            ostream_captions(*_output_file);
+            ostream_captions(captions, *_output_file);
         }
     }
+
     bool touch_file()
     {
         if(!_sfilename.empty() && _sfilename[0] == '-'){
@@ -218,8 +242,10 @@ public:
         file.close();
         return ret;
     }
+
     bool is_shutdown_requested() const { return _shutdown_requested.load(std::memory_order_acquire); }
     void request_shutdown() { _shutdown_requested.store(true, std::memory_order_release); }
+
     // Perform full shutdown/cleanup: flush & close file, set flag, uninitialize COM
     void shutdown()
     {
@@ -228,7 +254,8 @@ public:
             std::scoped_lock lock(_file_mutex);
             if (_output_file && _output_file->is_open()) {
                 // write any remaining captions before closing
-                ostream_captions(*_output_file);
+                auto captions = parse_captions();
+                ostream_captions(captions, *_output_file);
                 _output_file->flush();
                 _output_file->close();
                 _output_file.reset();
@@ -250,6 +277,8 @@ int main(int argc, char *argv[])
     std::string strFileName;
     std::string strTranslateLang;
     std::string strTranslateHost{"http://127.0.0.1:5000/"};
+    int nPollInterval = 10;
+    int nFlushInterval = 60;
     argparse::ArgumentParser program("get-livecaptions",VERSION_STRING);
 
     program.add_argument("-t", "--translate")
@@ -259,17 +288,25 @@ int main(int argc, char *argv[])
 
     program.add_argument("--translate-host")
         .help("libretranslate server running at HOST, default as (http://127.0.0.1:5000).")
-        .metavar("HOST");        
+        .metavar("HOST");
 
     program.add_argument("-o", "--output")
         .metavar("<file>")
         .help("filename, write content into file. use - for console.")
-        .required();        
+        .required();
+
+    program.add_argument("--poll-interval")
+        .help("UIAutomation polling interval in seconds (default: 10).")
+        .metavar("<seconds>")
+        .scan<'i', int>();
+
+    program.add_argument("--flush-interval")
+        .help("output file flush interval in seconds (default: 60).")
+        .metavar("<seconds>")
+        .scan<'i', int>();
 
     program.add_description("Write the content of LiveCaptions Windows System Program into file, continually.\nTranslate captions if --translate is specified, using libretranslate(gh:LibreTranslate/LibreTranslate).");
     program.add_epilog("use ctrl-c to exit program.");
-
-    
 
     try {
         if(argc==1) {program.print_help();exit(1);}
@@ -278,8 +315,22 @@ int main(int argc, char *argv[])
 
         if (program.is_used("--translate")){
             strTranslateLang = program.get<std::string>("--translate");
-            if (program.is_used("--translate-host")) 
+            if (program.is_used("--translate-host"))
                 strTranslateHost = program.get<std::string>("--translate-host");
+        }
+
+        nPollInterval = program.is_used("--poll-interval")
+            ? program.get<int>("--poll-interval") : 10;
+        nFlushInterval = program.is_used("--flush-interval")
+            ? program.get<int>("--flush-interval") : 60;
+
+        if (nPollInterval < 1) {
+            std::cerr << "--poll-interval must be >= 1" << std::endl;
+            return 1;
+        }
+        if (nFlushInterval < 1) {
+            std::cerr << "--flush-interval must be >= 1" << std::endl;
+            return 1;
         }
 
         if (!Engine::is_livecaption_running())
@@ -303,22 +354,21 @@ int main(int argc, char *argv[])
 
         asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](auto, auto){
-                                //std::cerr << "ctrl-c to exit." <<std::endl;
                                 engine_ptr->shutdown();
                                 io_context.stop();
                             });
-        std::cout<<"Save content into file, every 1 min."<<std::endl;
+        std::cout << "Save content into file, every " << nFlushInterval << " seconds." << std::endl;
         asio::co_spawn(io_context, [&]() -> asio::awaitable<void>
                        {
-                            asio::steady_timer timer_10s(io_context);
-                            asio::steady_timer timer_60s(io_context);
-                            
-                            // Initialize timer_60s to expire after 60 seconds
-                            timer_60s.expires_after(asio::chrono::seconds(60));
-                            
+                            asio::steady_timer timer_poll(io_context);
+                            asio::steady_timer timer_flush(io_context);
+
+                            // Initialize flush timer
+                            timer_flush.expires_after(asio::chrono::seconds(nFlushInterval));
+
                             while(!engine_ptr->is_shutdown_requested()){
-                                timer_10s.expires_after(asio::chrono::seconds(10));
-                                co_await timer_10s.async_wait(asio::use_awaitable);
+                                timer_poll.expires_after(asio::chrono::seconds(nPollInterval));
+                                co_await timer_poll.async_wait(asio::use_awaitable);
 
                                 if (!Engine::is_livecaption_running())
                                 {
@@ -328,14 +378,20 @@ int main(int argc, char *argv[])
                                     break;
                                 }
 
-                                // Output translation if language is specified, every 10s
-                                if(!strTranslateLang.empty()) 
-                                    engine_ptr->output_translate(strTranslateLang);
+                                bool need_translate = !strTranslateLang.empty();
+                                bool need_flush = std::chrono::steady_clock::now() >= timer_flush.expiry();
 
-                                // Output captions every 60s
-                                if(std::chrono::steady_clock::now() >= timer_60s.expiry()) {
-                                    engine_ptr->output_captions();
-                                    timer_60s.expires_after(asio::chrono::seconds(60));
+                                // Single UIAutomation call per tick, only when a consumer is due
+                                if (need_translate || need_flush) {
+                                    auto captions = engine_ptr->parse_captions();
+
+                                    if (need_translate)
+                                        engine_ptr->output_translate(captions, strTranslateLang);
+
+                                    if (need_flush) {
+                                        engine_ptr->output_captions(captions);
+                                        timer_flush.expires_after(asio::chrono::seconds(nFlushInterval));
+                                    }
                                 }
                             }
                             co_return;

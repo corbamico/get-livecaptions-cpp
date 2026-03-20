@@ -9,6 +9,11 @@
 #include <fstream>
 #include <optional>
 #include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <unordered_set>
+#include <atomic>
 
 #include <winrt/windows.ui.uiautomation.h>
 #include <uiautomation.h>
